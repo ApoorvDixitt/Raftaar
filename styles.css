@@ -1,0 +1,145 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 320px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: #0a0a0a;
+  color: #ffffff;
+}
+
+.popup-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  background: #111111;
+  border-bottom: 1px solid #222222;
+}
+
+.header-icon {
+  width: 22px;
+  height: 22px;
+  color: #22c55e;
+  flex-shrink: 0;
+}
+
+.header h1 {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: #ffffff;
+}
+
+.content {
+  padding: 20px;
+  flex: 1;
+}
+
+.solve-button {
+  width: 100%;
+  padding: 13px 16px;
+  background: #22c55e;
+  color: #000000;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background-color 0.2s ease;
+  letter-spacing: -0.2px;
+}
+
+.solve-button:hover {
+  background: #16a34a;
+}
+
+.solve-button:active {
+  background: #15803d;
+}
+
+.solve-button:disabled {
+  background: #262626;
+  color: #525252;
+  cursor: not-allowed;
+}
+
+.btn-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.status {
+  margin-top: 14px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+
+.status.idle {
+  color: #737373;
+  border-color: transparent;
+  padding: 10px 0;
+}
+
+.status.loading {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.06);
+  border-color: rgba(251, 191, 36, 0.15);
+}
+
+.status.success {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.06);
+  border-color: rgba(34, 197, 94, 0.15);
+}
+
+.status.error {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+.status.partial {
+  color: #f97316;
+  background: rgba(249, 115, 22, 0.06);
+  border-color: rgba(249, 115, 22, 0.15);
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(251, 191, 36, 0.25);
+  border-top-color: #fbbf24;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.footer {
+  padding: 10px 20px;
+  font-size: 10.5px;
+  color: #404040;
+  text-align: center;
+  border-top: 1px solid #1a1a1a;
+  letter-spacing: 0.3px;
+}
