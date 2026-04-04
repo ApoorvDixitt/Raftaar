@@ -82,80 +82,145 @@
   }
 
   // ═══════════════════════════════════════════════════
-  // MAIN EXTRACTION — cascading strategies
+  // MAIN EXTRACTION — run ALL strategies, merge, deduplicate
   // ═══════════════════════════════════════════════════
   function extractQuestionsFromDOM() {
     clearIndicators();
-    let questions = [];
 
-    // Platform-specific strategies first
-    questions = strategyCoursera();
-    if (questions.length > 0) return deduplicateQuestions(questions);
+    // Run every strategy and combine all results
+    const all = [
+      ...strategyCoursera(),
+      ...strategyMoodle(),
+      ...strategyGoogleForms(),
+      ...strategyCanvas(),
+      ...strategyA(),
+      ...strategyB(),
+      ...strategyC(),
+      ...strategyD()
+    ];
 
-    questions = strategyMoodle();
-    if (questions.length > 0) return deduplicateQuestions(questions);
-
-    questions = strategyGoogleForms();
-    if (questions.length > 0) return deduplicateQuestions(questions);
-
-    questions = strategyCanvas();
-    if (questions.length > 0) return deduplicateQuestions(questions);
-
-    // Generic strategies
-    questions = strategyA();
-    if (questions.length > 0) return deduplicateQuestions(questions);
-
-    questions = strategyB();
-    if (questions.length > 0) return deduplicateQuestions(questions);
-
-    questions = strategyC();
-    if (questions.length > 0) return deduplicateQuestions(questions);
-
-    questions = strategyD();
-    return deduplicateQuestions(questions);
+    return deduplicateQuestions(all);
   }
 
   // ═══════════════════════════════════════════════════
-  // COURSERA STRATEGY
+  // COURSERA STRATEGY — robust with multiple fallbacks
   // ═══════════════════════════════════════════════════
   function strategyCoursera() {
     const questions = [];
+
+    // Broad selector: any Submission question container (excludes non-question elements)
     const parts = document.querySelectorAll(
-      '[data-testid="part-Submission_MultipleChoiceQuestion"],' +
-      '[data-testid="part-Submission_CheckboxQuestion"],' +
-      '[data-testid="part-Submission_GradedMultipleChoiceQuestion"],' +
-      '[data-testid="part-Submission_GradedCheckboxQuestion"],' +
-      '[data-testid*="MultipleChoice"],' +
-      '[data-testid*="Checkbox"]'
+      '[data-testid*="part-Submission_"][data-testid*="Question"]'
     );
     if (parts.length === 0) return questions;
 
     parts.forEach((part) => {
-      // Get question text from the prompt/cml-viewer inside the legend
-      const legendEl = part.querySelector('[data-testid="legend"]');
-      if (!legendEl) return;
-      const promptEl = legendEl.querySelector('[data-testid="cml-viewer"]');
-      if (!promptEl) return;
-      const questionText = sanitizeElement(promptEl);
-      if (!questionText) return;
+      // Skip non-MCQ types (text input, free form, reflective)
+      const testId = part.getAttribute('data-testid') || '';
+      if (/TextInput|FreeForm|Reflective/i.test(testId)) return;
 
-      // Get options from radiogroup or checkbox group
-      const radioGroup = part.querySelector('[role="radiogroup"], [role="group"]');
+      // === EXTRACT QUESTION TEXT (multiple fallback paths) ===
+      let questionText = '';
+
+      // Path 1: legend > cml-viewer (most common)
+      const legendEl = part.querySelector('[data-testid="legend"]');
+      if (legendEl) {
+        const cmlViewer = legendEl.querySelector('[data-testid="cml-viewer"]');
+        if (cmlViewer) {
+          questionText = sanitizeElement(cmlViewer);
+        }
+        // Path 2: legend > prompt div (id starts with "prompt-")
+        if (!questionText) {
+          const promptDiv = legendEl.querySelector('[id^="prompt-"]');
+          if (promptDiv) questionText = sanitizeElement(promptDiv);
+        }
+        // Path 3: legend > any .rc-CML container
+        if (!questionText) {
+          const cml = legendEl.querySelector('.rc-CML');
+          if (cml) questionText = sanitizeElement(cml);
+        }
+        // Path 4: legend text itself (last resort)
+        if (!questionText) {
+          questionText = sanitizeElement(legendEl);
+        }
+      }
+
+      // Path 5: follow aria-labelledby from radiogroup
+      if (!questionText) {
+        const rg = part.querySelector('[role="radiogroup"]');
+        if (rg) {
+          const lblId = rg.getAttribute('aria-labelledby');
+          if (lblId) {
+            const lblEl = document.getElementById(lblId);
+            if (lblEl) {
+              const cml = lblEl.querySelector('[data-testid="cml-viewer"]') || lblEl;
+              questionText = sanitizeElement(cml);
+            }
+          }
+        }
+      }
+
+      if (!questionText || questionText.length < 5) return;
+
+      // === EXTRACT OPTIONS (multiple fallback paths) ===
+      const radioGroup = part.querySelector('[role="radiogroup"]');
       if (!radioGroup) return;
 
-      const optionContainers = radioGroup.querySelectorAll('.rc-Option');
-      const options = [];
-      optionContainers.forEach((optContainer, idx) => {
-        const labelText = optContainer.querySelector('.cds-checkboxAndRadio-labelText');
-        if (!labelText) return;
-        const viewer = labelText.querySelector('[data-testid="cml-viewer"]');
-        // Target the radio wrapper — ::after appears right next to the radio circle
-        const el = optContainer.querySelector('.cds-choiceInput-root') || optContainer.querySelector('label') || optContainer;
-        const text = viewer ? sanitizeElement(viewer) : sanitizeElement(labelText);
-        if (text) {
-          options.push({ index: idx, text: cleanOptionText(text), element: el });
-        }
-      });
+      let options = [];
+
+      // Path 1: .rc-Option containers (most common)
+      const rcOptions = radioGroup.querySelectorAll('.rc-Option');
+      if (rcOptions.length >= 2) {
+        rcOptions.forEach((optContainer, idx) => {
+          // Try multiple text sources
+          const labelText = optContainer.querySelector('.cds-checkboxAndRadio-labelText');
+          let text = '';
+          if (labelText) {
+            const viewer = labelText.querySelector('[data-testid="cml-viewer"]');
+            text = viewer ? sanitizeElement(viewer) : sanitizeElement(labelText);
+          } else {
+            // Fallback: try label element directly
+            const label = optContainer.querySelector('label');
+            if (label) text = sanitizeElement(label);
+          }
+          if (!text) {
+            // Last resort: full option container text
+            text = sanitizeElement(optContainer);
+          }
+
+          const el = optContainer.querySelector('.cds-choiceInput-root') || optContainer.querySelector('label') || optContainer;
+          if (text) {
+            options.push({ index: idx, text: cleanOptionText(text), element: el });
+          }
+        });
+      }
+
+      // Path 2: label-based detection (fallback)
+      if (options.length < 2) {
+        options = [];
+        const labels = radioGroup.querySelectorAll('label');
+        labels.forEach((label, idx) => {
+          const text = sanitizeElement(label);
+          const el = label.querySelector('.cds-choiceInput-root') || label;
+          if (text) {
+            options.push({ index: idx, text: cleanOptionText(text), element: el });
+          }
+        });
+      }
+
+      // Path 3: radio input-based detection (last resort)
+      if (options.length < 2) {
+        options = [];
+        const radios = radioGroup.querySelectorAll('input[type="radio"], input[type="checkbox"]');
+        radios.forEach((radio, idx) => {
+          const label = radio.closest('label') || document.querySelector(`label[for="${radio.id}"]`);
+          const el = label || radio.parentElement;
+          const text = sanitizeElement(el);
+          if (text) {
+            options.push({ index: idx, text: cleanOptionText(text), element: radio.closest('.cds-choiceInput-root') || el });
+          }
+        });
+      }
 
       if (options.length >= 2) {
         questions.push({
