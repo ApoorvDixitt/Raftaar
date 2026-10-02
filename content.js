@@ -99,7 +99,10 @@
       ...strategyA(),
       ...strategyB(),
       ...strategyC(),
-      ...strategyD()
+      ...strategyD(),
+      // ADDITIVE: dedicated detector for checkbox / multiple-select groups.
+      // Runs alongside the existing strategies; dedup removes any overlap.
+      ...strategyMultiSelect()
     ];
 
     const merged = deduplicateQuestions(all);
@@ -131,42 +134,60 @@
       let checkboxHits = 0;
       let radioHits = 0;
 
-      els.forEach(el => {
-        if (!el || typeof el.querySelector !== 'function') return;
+      const classify = (el) => {
+        if (!el) return null;
 
-        // Direct input, descendant input, or an input bound via label[for]
-        let input = null;
-        if (el.matches && el.matches('input[type="checkbox"],input[type="radio"]')) {
-          input = el;
+        // 1) The element itself is a native input
+        if (el.matches) {
+          if (el.matches('input[type="checkbox"]')) return 'checkbox';
+          if (el.matches('input[type="radio"]')) return 'radio';
+          // 2) The element itself carries an ARIA role
+          if (el.matches('[role="checkbox"]')) return 'checkbox';
+          if (el.matches('[role="radio"]')) return 'radio';
         }
-        if (!input) {
-          input = el.querySelector('input[type="checkbox"],input[type="radio"]');
+
+        // 3) A native input somewhere inside the element
+        if (typeof el.querySelector === 'function') {
+          if (el.querySelector('input[type="checkbox"]')) return 'checkbox';
+          if (el.querySelector('input[type="radio"]')) return 'radio';
+          // 4) An ARIA-role control inside the element (custom widgets)
+          if (el.querySelector('[role="checkbox"]')) return 'checkbox';
+          if (el.querySelector('[role="radio"]')) return 'radio';
         }
-        if (!input && el.getAttribute) {
+
+        // 5) A label bound to an input via for=""
+        if (el.getAttribute) {
           const forId = el.getAttribute('for');
           if (forId) {
             const bound = document.getElementById(forId);
-            if (bound && bound.matches && bound.matches('input[type="checkbox"],input[type="radio"]')) {
-              input = bound;
+            if (bound && bound.matches) {
+              if (bound.matches('input[type="checkbox"],[role="checkbox"]')) return 'checkbox';
+              if (bound.matches('input[type="radio"],[role="radio"]')) return 'radio';
             }
           }
         }
 
-        // ARIA fallback: role="checkbox" vs role="radio"
-        let role = input ? input.getAttribute('type') : null;
-        if (!role && el.getAttribute) {
-          const ariaRole = el.getAttribute('role');
-          if (ariaRole === 'checkbox') role = 'checkbox';
-          else if (ariaRole === 'radio') role = 'radio';
-        } else if (role === 'checkbox' || role === 'radio') {
-          // normalized below
+        // 6) Walk up to the nearest option container and look inside it
+        if (el.closest) {
+          const container = el.closest(
+            '.rc-Option,[role="checkbox"],[role="radio"],label,li,div'
+          );
+          if (container && container !== el && typeof container.querySelector === 'function') {
+            if (container.querySelector('input[type="checkbox"],[role="checkbox"]')) return 'checkbox';
+            if (container.querySelector('input[type="radio"],[role="radio"]')) return 'radio';
+          }
         }
 
-        if (role === 'checkbox') checkboxHits++;
-        else if (role === 'radio') radioHits++;
+        return null;
+      };
+
+      els.forEach(el => {
+        const kind = classify(el);
+        if (kind === 'checkbox') checkboxHits++;
+        else if (kind === 'radio') radioHits++;
       });
 
-      // Only call it multi-select when we clearly saw checkboxes and no radios.
+      // Multi-select when checkboxes dominate and no radios are present.
       return checkboxHits >= 2 && radioHits === 0;
     } catch (e) {
       return false;
@@ -218,7 +239,7 @@
 
       // Path 5: follow aria-labelledby from radiogroup
       if (!questionText) {
-        const rg = part.querySelector('[role="radiogroup"]');
+        const rg = part.querySelector('[role="radiogroup"]') || part.querySelector('[role="group"]');
         if (rg) {
           const lblId = rg.getAttribute('aria-labelledby');
           if (lblId) {
@@ -234,7 +255,14 @@
       if (!questionText || questionText.length < 5) return;
 
       // === EXTRACT OPTIONS (multiple fallback paths) ===
-      const radioGroup = part.querySelector('[role="radiogroup"]');
+      // Prefer a radiogroup (single-answer MCQ — existing behaviour).
+      // ADDITIVE: if there is no radiogroup, fall back to a checkbox group
+      // (role="group") which Coursera uses for "select all that apply"
+      // multiple-select questions. The option-parsing paths below are
+      // identical for both, so single-answer extraction is unchanged.
+      const radioGroup =
+        part.querySelector('[role="radiogroup"]') ||
+        part.querySelector('[role="group"]');
       if (!radioGroup) return;
 
       let options = [];
@@ -642,6 +670,131 @@
     });
 
     return questions;
+  }
+
+  // ═══════════════════════════════════════════════════
+  // STRATEGY MULTI-SELECT (ADDITIVE)
+  // Dedicated detector for "select all that apply" / multiple-answer
+  // questions built on checkboxes. This runs IN ADDITION to the existing
+  // strategies and never modifies them. It targets two shapes:
+  //   1) ARIA checkbox groups: [role="group"] containing [role="checkbox"]
+  //   2) Native checkbox groups: a container with 2+ input[type="checkbox"]
+  // Questions already captured by other strategies are removed by dedup.
+  // ═══════════════════════════════════════════════════
+  function strategyMultiSelect() {
+    const questions = [];
+    const seenContainers = new Set();
+
+    const pushFromContainer = (container, optionNodes, getText, getEl) => {
+      if (!container || seenContainers.has(container)) return;
+
+      const options = [];
+      optionNodes.forEach((node, idx) => {
+        const text = cleanOptionText(sanitizeText(getText(node)));
+        if (!text) return;
+        options.push({ index: options.length, text, element: getEl(node) });
+      });
+      if (options.length < 2) return;
+
+      // Question text: nearest heading/legend/label above the group.
+      let questionText = findQuestionTextFor(container, options);
+      if (!questionText || questionText.length < 5) return;
+
+      seenContainers.add(container);
+      questions.push({
+        index: questions.length,
+        questionText,
+        options,
+        optionElements: options.map(o => o.element)
+      });
+    };
+
+    // --- Shape 1: ARIA checkbox groups ---
+    document.querySelectorAll('[role="group"]').forEach(group => {
+      const checkboxes = group.querySelectorAll('[role="checkbox"]');
+      if (checkboxes.length < 2) return;
+      pushFromContainer(
+        group,
+        Array.from(checkboxes),
+        node => {
+          const viewer = node.querySelector('[data-testid="cml-viewer"]');
+          const labelText = node.querySelector('.cds-checkboxAndRadio-labelText, label, [dir="auto"]');
+          return viewer ? sanitizeElement(viewer)
+               : labelText ? sanitizeElement(labelText)
+               : sanitizeElement(node);
+        },
+        node => node
+      );
+    });
+
+    // --- Shape 2: native checkbox groups ---
+    // Group checkboxes by their nearest common container (fieldset/div/ul/form).
+    const nativeBoxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+    const byContainer = new Map();
+    nativeBoxes.forEach(box => {
+      const container = box.closest('fieldset, ul, ol, form, section, div');
+      if (!container) return;
+      if (!byContainer.has(container)) byContainer.set(container, []);
+      byContainer.get(container).push(box);
+    });
+    // Prefer the tightest container that holds exactly one group of boxes.
+    byContainer.forEach((boxes, container) => {
+      if (boxes.length < 2) return;
+      pushFromContainer(
+        container,
+        boxes,
+        box => {
+          const label = box.closest('label') ||
+            (box.id ? document.querySelector(`label[for="${box.id}"]`) : null) ||
+            box.parentElement;
+          return label ? sanitizeElement(label) : '';
+        },
+        box => box.closest('label') ||
+          (box.id ? document.querySelector(`label[for="${box.id}"]`) : null) ||
+          box.parentElement ||
+          box
+      );
+    });
+
+    return questions;
+  }
+
+  // Find a question stem for a group/container by walking up and looking at
+  // common labelling patterns, then stripping option text as a last resort.
+  function findQuestionTextFor(container, options) {
+    // 1) aria-labelledby on the container
+    const lblId = container.getAttribute && container.getAttribute('aria-labelledby');
+    if (lblId) {
+      const lblEl = document.getElementById(lblId);
+      if (lblEl) {
+        const viewer = lblEl.querySelector('[data-testid="cml-viewer"]') || lblEl;
+        const t = sanitizeElement(viewer);
+        if (t && t.length >= 5) return t;
+      }
+    }
+
+    // 2) legend / heading inside the container or an ancestor
+    const scope = container.closest('fieldset, [data-testid*="Question"], .question, [class*="question"], section, form, div') || container;
+    const labelEl = scope.querySelector('legend, [role="heading"], .qtext, .question_text, [data-testid="legend"], [id^="prompt-"], h1, h2, h3, h4');
+    if (labelEl) {
+      const viewer = labelEl.querySelector('[data-testid="cml-viewer"]') || labelEl;
+      const t = sanitizeElement(viewer);
+      if (t && t.length >= 5) return t;
+    }
+
+    // 3) previous sibling text of the group
+    let prev = container.previousElementSibling;
+    while (prev) {
+      const t = sanitizeElement(prev);
+      if (t && t.length >= 5) return t;
+      prev = prev.previousElementSibling;
+    }
+
+    // 4) scope text minus option text
+    let t = sanitizeElement(scope);
+    options.forEach(o => { if (o.text) t = t.replace(o.text, ''); });
+    t = sanitizeText(t);
+    return t;
   }
 
   // ═══════════════════════════════════════════════════
