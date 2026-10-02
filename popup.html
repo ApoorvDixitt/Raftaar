@@ -11,23 +11,73 @@
         <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
       </svg>
       <h1>MCQ Solver</h1>
+      <button id="settingsBtn" class="settings-btn" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+        </svg>
+      </button>
     </div>
 
-    <div class="content">
-      <button id="solveBtn" data-testid="solve-button" class="solve-button">
+    <!-- Main View -->
+    <div id="mainView" class="content">
+      <div id="tokenWarning" class="token-warning" style="display:none;">
+        <span>No token configured.</span>
+        <button id="goToSettings" class="link-btn">Add token</button>
+      </div>
+
+      <button id="solveBtn" class="solve-button">
         <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
         </svg>
         Solve This Page
       </button>
 
-      <div id="status" data-testid="status-message" class="status idle">
+      <div id="status" class="status idle">
         Ready to solve MCQs on this page.
       </div>
     </div>
 
+    <!-- Settings View -->
+    <div id="settingsView" class="content" style="display:none;">
+      <div class="settings-header">
+        <button id="backBtn" class="back-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+          Back
+        </button>
+        <span class="settings-title">Token Settings</span>
+      </div>
+
+      <div id="tokenStatus" class="token-status"></div>
+
+      <div class="token-input-group">
+        <label for="tokenInput">Bedrock Bearer Token</label>
+        <input type="password" id="tokenInput" class="token-input" placeholder="Enter your bearer token...">
+        <button id="toggleVisibility" class="toggle-vis-btn" title="Show/hide token">
+          <svg id="eyeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="token-actions">
+        <button id="saveTokenBtn" class="action-btn save-btn">Save Token</button>
+        <button id="deleteTokenBtn" class="action-btn delete-btn">Delete Token</button>
+      </div>
+
+      <p class="token-hint">Token is stored in session storage and cleared when the browser closes.</p>
+
+      <div class="test-section">
+        <button id="testApiBtn" class="action-btn test-btn">Test API Connection</button>
+        <div id="testLog" class="test-log"></div>
+      </div>
+    </div>
+
     <div class="footer">
-      Claude Sonnet 4.5
+      Amazon Bedrock &middot; GLM 5
     </div>
   </div>
   <script src="popup.js"></script>

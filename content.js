@@ -20,6 +20,9 @@
         const serializableQuestions = questions.map(q => ({
           index: q.index,
           questionText: q.questionText,
+          // isMulti: additive hint for multiple-select (multiple correct answers)
+          // questions. Defaults to false so single-answer MCQ behaviour is unchanged.
+          isMulti: q.isMulti === true,
           options: q.options.map(o => ({ index: o.index, text: o.text }))
         }));
         sendResponse({ questions: serializableQuestions });
@@ -99,7 +102,75 @@
       ...strategyD()
     ];
 
-    return deduplicateQuestions(all);
+    const merged = deduplicateQuestions(all);
+
+    // ADDITIVE: annotate each question with a multi-select hint WITHOUT
+    // modifying any extraction strategy above. Detection is read-only and
+    // derived from the already-extracted option elements. If detection is
+    // inconclusive, isMulti stays false and behaviour is identical to before.
+    merged.forEach(q => {
+      q.isMulti = detectMultiSelect(q);
+    });
+
+    return merged;
+  }
+
+  // ═══════════════════════════════════════════════════
+  // MULTI-SELECT DETECTION (additive, read-only)
+  // A question is treated as multiple-select (multiple correct answers)
+  // when its option controls are checkboxes rather than radios, since
+  // radios are mutually exclusive by definition and checkboxes are not.
+  // This never alters question/option extraction — it only inspects the
+  // DOM elements already captured by the strategies.
+  // ═══════════════════════════════════════════════════
+  function detectMultiSelect(question) {
+    try {
+      const els = (question && question.optionElements) || [];
+      if (!els.length) return false;
+
+      let checkboxHits = 0;
+      let radioHits = 0;
+
+      els.forEach(el => {
+        if (!el || typeof el.querySelector !== 'function') return;
+
+        // Direct input, descendant input, or an input bound via label[for]
+        let input = null;
+        if (el.matches && el.matches('input[type="checkbox"],input[type="radio"]')) {
+          input = el;
+        }
+        if (!input) {
+          input = el.querySelector('input[type="checkbox"],input[type="radio"]');
+        }
+        if (!input && el.getAttribute) {
+          const forId = el.getAttribute('for');
+          if (forId) {
+            const bound = document.getElementById(forId);
+            if (bound && bound.matches && bound.matches('input[type="checkbox"],input[type="radio"]')) {
+              input = bound;
+            }
+          }
+        }
+
+        // ARIA fallback: role="checkbox" vs role="radio"
+        let role = input ? input.getAttribute('type') : null;
+        if (!role && el.getAttribute) {
+          const ariaRole = el.getAttribute('role');
+          if (ariaRole === 'checkbox') role = 'checkbox';
+          else if (ariaRole === 'radio') role = 'radio';
+        } else if (role === 'checkbox' || role === 'radio') {
+          // normalized below
+        }
+
+        if (role === 'checkbox') checkboxHits++;
+        else if (role === 'radio') radioHits++;
+      });
+
+      // Only call it multi-select when we clearly saw checkboxes and no radios.
+      return checkboxHits >= 2 && radioHits === 0;
+    } catch (e) {
+      return false;
+    }
   }
 
   // ═══════════════════════════════════════════════════
@@ -610,14 +681,21 @@
 
     if (!_extractedQuestions || _extractedQuestions.length === 0) return;
 
-    Object.entries(answersMap).forEach(([qIdx, optIdx]) => {
-      if (optIdx === null) return;
+    Object.entries(answersMap).forEach(([qIdx, answer]) => {
+      if (answer === null || answer === undefined) return;
       const question = _extractedQuestions[parseInt(qIdx)];
       if (!question) return;
-      const option = question.options[optIdx];
-      if (!option || !option.element) return;
 
-      option.element.classList.add(_activeClass);
+      // ADDITIVE: an answer may be a single option index (single-answer MCQ,
+      // unchanged behaviour) OR an array of indices (multiple-select). Both
+      // are highlighted the same way — only the number of dots differs.
+      const indices = Array.isArray(answer) ? answer : [answer];
+      indices.forEach(optIdx => {
+        if (optIdx === null || optIdx === undefined) return;
+        const option = question.options[optIdx];
+        if (!option || !option.element) return;
+        option.element.classList.add(_activeClass);
+      });
     });
 
     // Auto-cleanup: remove indicators after 2 minutes
